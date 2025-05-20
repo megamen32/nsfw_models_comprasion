@@ -75,7 +75,7 @@ def _run_nsfw_model(image: Image.Image):
         input_tensor = _nsfw_processor(image).unsqueeze(0).to(device)
         with torch.no_grad():
             probs = _nsfw_model(input_tensor).softmax(dim=-1).cpu()[0]
-        score = float(probs[1])
+        score = float(probs[0])
     else:
         inputs = _nsfw_processor(images=image, return_tensors="pt").to(_nsfw_model.device)
         with torch.no_grad():
@@ -84,10 +84,29 @@ def _run_nsfw_model(image: Image.Image):
         score = float(probs[0][1])
 
     return score >= threshold, score
-
+skip_class=[
+    # "FEMALE_GENITALIA_COVERED",
+    "FACE_FEMALE",
+   # "BUTTOCKS_EXPOSED",
+   # "FEMALE_BREAST_EXPOSED",
+   # "FEMALE_GENITALIA_EXPOSED",
+   # "MALE_BREAST_EXPOSED",
+  #  "ANUS_EXPOSED",
+   # "FEET_EXPOSED",
+   # "BELLY_COVERED",
+   # "FEET_COVERED",
+  #  "ARMPITS_COVERED",
+  #  "ARMPITS_EXPOSED",
+    "FACE_MALE",
+  #  "BELLY_EXPOSED",
+   # "MALE_GENITALIA_EXPOSED",
+  #  "ANUS_COVERED",
+  #  "FEMALE_BREAST_COVERED",
+  #  "BUTTOCKS_COVERED",
+]
 def _run_nudenet(image_path: str, threshold: float = 0.4):
     detections = _nudenet.detect(image_path)
-    flagged = [d for d in detections if d["score"] >= threshold]
+    flagged = [d for d in detections if d["score"] >= threshold and d['class'] not in skip_class]
     score = max([d["score"] for d in flagged], default=0.0)
     return bool(flagged), score, flagged
 
@@ -154,20 +173,25 @@ def analyze_bytes(file_bytes: bytes, suffix: str = ".jpg"):
     return analyze_file(tmp_path)
 
 async def check_avatar(bot, user_id: int):
+    # 2) Если нет в кэше — грузим foto
     photos = await bot.get_user_profile_photos(user_id, limit=1)
     if not photos.total_count:
-        return False, 0.0, ""
+        result = (False, 0.0, "")
+        return result
 
     file_id = photos.photos[0][0].file_id
     file = await bot.get_file(file_id)
     ext = Path(file.file_path).suffix.lower()
     file_bytes = (await bot.download_file(file.file_path)).read()
 
+    # 3) Проверяем моделью
     is_nsfw, score, _, _ = analyze_bytes(file_bytes, suffix=ext)
-    return is_nsfw, score, file_id
+
+    result = (is_nsfw, score, file_id)
+    return result
 
 if __name__ == "__main__":
-    path = "antiwhorebot/photo_2025-05-15_13-16-35.mp4"
+    path = "antiwhorsebot/photo_2025-05-15_13-16-35.mp4"
     is_nsfw, score, src, debug = analyze_file(path)
     print("🔍 Проверка:", src)
     print("⚠️ NSFW:", is_nsfw)
